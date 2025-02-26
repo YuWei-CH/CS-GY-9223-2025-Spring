@@ -1,0 +1,1 @@
+### We added some debug prints to chat.js to help us find problems.

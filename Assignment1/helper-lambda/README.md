@@ -1,0 +1,3 @@
+fetch_yelp_restaurants.py is an AWS Lambda function that fetches restaurant data from the Yelp API and stores it in AWS DynamoDB. Its main purpose is to collect restaurant data from Manhattan, NY for various cuisines (e.g. Chinese, Italian, Japanese, etc.) and store it in DynamoDB for subsequent analysis or querying.
+
+DynamoDBToOpenSearch.py is an AWS Lambda function whose main purpose is to listen for data changes in AWS DynamoDB and automatically synchronize the data to AWS OpenSearch (Elasticsearch). When there is new restaurant data in DynamoDB, it will be automatically indexed to OpenSearch for subsequent queries and searches.

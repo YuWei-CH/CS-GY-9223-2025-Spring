@@ -1,1 +1,1 @@
-# -CS-GY-9223-2025-Spring
+# CS-GY-9223-2025-Spring
