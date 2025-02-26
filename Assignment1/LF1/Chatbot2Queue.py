@@ -4,14 +4,14 @@ import time
 import re
 from datetime import datetime
 from boto3.dynamodb.conditions import Key
-#LF1
+
+# LF1
 # Initialize AWS clients
 sqs = boto3.client("sqs")
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table("ChatHistory")
 
 SQS_QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/515966538082/DiningSuggestionsQueue"
-
 
 def lambda_handler(event, context):
     print("Received Lex Event:", json.dumps(event, indent=2))
@@ -20,29 +20,29 @@ def lambda_handler(event, context):
     intent_name = intent["name"]
     invocation_source = event["invocationSource"]
 
-    # Ensure session attributes exist
+    # Ensure session attributes exist and extract session_id
     session_attributes = event["sessionState"].get("sessionAttributes", {})
+    session_id = session_attributes.get("session_id", None)
 
     if intent_name == "GreetingIntent":
         if invocation_source == "DialogCodeHook":
             return handle_greeting(intent, session_attributes)
         elif invocation_source == "FulfillmentCodeHook":
-            new_session_id, response = fulfill_greeting(intent)
-            session_attributes["session_id"] = new_session_id
+            session_id, response = fulfill_greeting(intent, session_attributes)
             return response
 
     elif intent_name == "DiningSuggestionsIntent":
         if invocation_source == "DialogCodeHook":
-            session_id = session_attributes.get("session_id", f"sess-{int(time.time())}")
+            session_id = session_attributes.get("session_id", f"sess-{int(time.time())}")  # Ensure session_id exists
+            session_attributes["session_id"] = session_id  # Persist it
             return handle_dining_suggestions(intent, session_id, session_attributes)
         elif invocation_source == "FulfillmentCodeHook":
             return fulfill_dining_suggestions(intent["slots"], session_attributes)
 
     elif intent_name == "ThankYouIntent":
-        return respond("You're welcome! Let me know if you need anything else.", intent_name)
+        return respond("You're welcome! Let me know if you need anything else.", intent_name, session_attributes=session_attributes)
 
-    return respond("I'm not sure how to help with that.", intent_name)
-
+    return respond("I'm not sure how to help with that.", intent_name, session_attributes=session_attributes)
 
 def handle_greeting(intent, session_attributes):
     slots = intent.get("slots", {})
@@ -52,28 +52,30 @@ def handle_greeting(intent, session_attributes):
     if not session_id_input:
         return elicit_slot(
             "GreetingIntent", slots, "sessionID",
-            "Have you been with us before? If yes, please provide your session ID; otherwise, type 'no'."
+            "Have you been with us before? If yes, please provide your session ID; otherwise, type 'no'.",
+            session_attributes
         )
 
     if session_id_input.lower() == "no":
-        new_session_id = f"sess-{int(time.time())}"
-        table.put_item(Item={"session_id": new_session_id, "timestamp": int(time.time())})
-        session_attributes["session_id"] = new_session_id  # Fix: Persist the session
+        session_id = f"sess-{int(time.time())}"
+        table.put_item(Item={"session_id": session_id, "timestamp": int(time.time())})
+        session_attributes["session_id"] = session_id  # Persist session_id
         return respond(
-            f"Nice to meet you! Your new session ID is {new_session_id}. How can I help?",
+            f"Nice to meet you! Your new session ID is {session_id}. How can I help?",
             "GreetingIntent", session_attributes=session_attributes
         )
 
     if not is_valid_session_id(session_id_input):
         return elicit_slot(
             "GreetingIntent", slots, "sessionID",
-            "Invalid session ID format. Please enter a valid session ID (sess-XXXXXXXXXX) or type 'no' if you're new."
+            "Invalid session ID format. Please enter a valid session ID (sess-XXXXXXXXXX) or type 'no' if you're new.",
+            session_attributes
         )
 
-    session_attributes["session_id"] = session_id_input  # Fix: Persist the session
-    return delegate(intent, "GreetingIntent")
+    session_attributes["session_id"] = session_id_input  # Persist session_id
+    return delegate(intent, "GreetingIntent", session_attributes)
 
-def fulfill_greeting(intent):
+def fulfill_greeting(intent, session_attributes):
     slots = intent.get("slots", {})
     session_id_input = slots["sessionID"]["value"]["interpretedValue"].strip()
 
@@ -83,15 +85,10 @@ def fulfill_greeting(intent):
     )
     items = response.get("Items", [])
 
-    # Prepare session attributes
-    session_attributes = {"session_id": session_id_input}
-
     if items:
         latest_record = items[0]
-
-        # Ensure all relevant data is retrieved, not just RestaurantName
         last_result = ""
-        if "RestaurantName" in latest_record or "previous_messages" in latest_record:
+        if "RestaurantName" in latest_record:
             last_result += "🍴 **Your Last Recommendation:**\n\n"
             last_result += f"🍽️ **Name:** {latest_record.get('RestaurantName', 'Unknown')}\n"
             last_result += f"📍 **Address:** {latest_record.get('RestaurantAddress', 'Unknown')}\n"
@@ -99,24 +96,22 @@ def fulfill_greeting(intent):
             last_result += f"💬 **Reviews:** {latest_record.get('RestaurantReviews', 'N/A')}\n\n"
             last_result += "Hope you enjoyed it! 😋\n"
 
-        # Store last messages to keep conversation state
-        if "previous_messages" in latest_record:
-            session_attributes["previous_messages"] = latest_record["previous_messages"]
+        session_attributes["session_id"] = session_id_input  # Ensure session_id is stored
 
         return session_id_input, respond(
             f"Hey! Session **{session_id_input}** is active.\n\n{last_result}How can I help?",
             "GreetingIntent", session_attributes=session_attributes
         )
 
-    # If no session is found, create a new one
+    # If session_id is not found, create a new one
     new_session_id = f"sess-{int(time.time())}"
     table.put_item(Item={"session_id": new_session_id, "timestamp": int(time.time())})
+    session_attributes["session_id"] = new_session_id  # Ensure session_id is stored
 
     return new_session_id, respond(
         f"Session {session_id_input} not found. Created a new session: {new_session_id}. How can I assist?",
-        "GreetingIntent", session_attributes={"session_id": new_session_id}
+        "GreetingIntent", session_attributes=session_attributes
     )
-
 
 def handle_dining_suggestions(intent, session_id, session_attributes):
     slots = intent.get("slots", {})
@@ -134,33 +129,31 @@ def handle_dining_suggestions(intent, session_id, session_attributes):
 
         if not slot_data or "value" not in slot_data or "interpretedValue" not in slot_data["value"]:
             # First-time prompt vs. reprompt
-            if slot_name in prompted_slots:
-                message = generate_reprompt(slot_name)  # Reprompt for invalid input
-            else:
-                message = generate_prompt(slot_name)  # First-time prompt
+            message = (
+                generate_reprompt(slot_name) if slot_name in prompted_slots else generate_prompt(slot_name)
+            )
 
             # Mark this slot as prompted
             prompted_slots[slot_name] = True
             session_attributes["prompted_slots"] = json.dumps(prompted_slots)  # Store updated tracking info
 
             return elicit_slot(
-                "DiningSuggestionsIntent", slots, slot_name, message
+                "DiningSuggestionsIntent", slots, slot_name, message, session_attributes
             )
 
         # Validate slot input
         slot_value = slot_data["value"]["interpretedValue"].strip()
         if not is_valid_slot(slot_name, slot_value):
             message = generate_reprompt(slot_name)  # Use reprompt message
-            return elicit_slot("DiningSuggestionsIntent", slots, slot_name, message)
+            return elicit_slot("DiningSuggestionsIntent", slots, slot_name, message, session_attributes)
 
     # If all slots are filled, delegate to Lex
-    return delegate(intent, "DiningSuggestionsIntent")
-
-
-
+    return delegate(intent, "DiningSuggestionsIntent", session_attributes)
 
 def fulfill_dining_suggestions(slots, session_attributes):
     session_id = session_attributes.get("session_id", f"sess-{int(time.time())}")
+    session_attributes["session_id"] = session_id  # Ensure session_id is stored
+
     slot_values = {slot: slots[slot]["value"]["interpretedValue"] for slot in slots}
 
     try:
@@ -169,41 +162,18 @@ def fulfill_dining_suggestions(slots, session_attributes):
             MessageBody=json.dumps(slot_values),
             MessageAttributes={'session_id': {'DataType': 'String', 'StringValue': session_id}}
         )
-    except Exception as e:
+    except Exception:
         return respond("Couldn't process your request right now. Try again later.", "DiningSuggestionsIntent")
 
     return respond(
         f"I'll find some {slot_values['cuisine']} restaurants in {slot_values['location']} for {slot_values['numPeople']} "
         f"people on {slot_values['date']} at {slot_values['time']}. You'll receive an email at {slot_values['email']} soon!",
-        "DiningSuggestionsIntent"
+        "DiningSuggestionsIntent", session_attributes=session_attributes
     )
 
-
 # Utility Functions
-
 def is_valid_session_id(session_id):
     return re.match(r"^sess-\d{10}$", session_id) is not None
-
-
-def is_valid_slot(slot_name, slot_value):
-    if slot_name == "cuisine":
-        return slot_value.lower() in ["chinese", "italian", "japanese", "indian", "mexican"]
-    elif slot_name == "email":
-        return re.match(r"[^@]+@[^@]+\.[^@]+", slot_value) is not None
-    elif slot_name == "date":
-        try:
-            datetime.strptime(slot_value, "%Y-%m-%d")
-            return True
-        except ValueError:
-            return False
-    elif slot_name == "time":
-        # Allow Amazon Lex's flexible time format (AMAZON.TIME handles it)
-        return bool(slot_value.strip())  # As long as there is a value, it's valid!
-    elif slot_name == "numPeople":
-        return slot_value.isdigit() and int(slot_value) > 0
-    return True
-
-
 
 def generate_prompt(slot_name):
     """ First-time slot prompts """
@@ -229,13 +199,30 @@ def generate_reprompt(slot_name):
     }
     return reprompt_messages.get(slot_name, f"Could you please provide a valid {slot_name}?")
 
+def is_valid_slot(slot_name, slot_value):
+    if slot_name == "cuisine":
+        return slot_value.lower() in ["chinese", "italian", "japanese", "indian", "mexican"]
+    elif slot_name == "email":
+        return re.match(r"[^@]+@[^@]+\.[^@]+", slot_value) is not None
+    elif slot_name == "date":
+        try:
+            datetime.strptime(slot_value, "%Y-%m-%d")
+            return True
+        except ValueError:
+            return False
+    elif slot_name == "time":
+        return bool(slot_value.strip())  # Any non-empty value is valid
+    elif slot_name == "numPeople":
+        return slot_value.isdigit() and int(slot_value) > 0
+    return True
 
-
-def delegate(intent, intent_name):
+#?should we keep the session attributes
+def delegate(intent, intent_name, session_attributes = None):
     return {
         "sessionState": {
             "dialogAction": {"type": "Delegate"},
-            "intent": {"name": intent_name, "slots": intent.get("slots"), "state": "InProgress"}
+            "intent": {"name": intent_name, "slots": intent.get("slots"), "state": "InProgress"},
+            "sessionAttributes": session_attributes if session_attributes else {} # Ensure session attributes persist
         }
     }
 
@@ -257,6 +244,19 @@ def respond(message, intent_name, slots=None, dialog_action_type="Close", slot_t
 
     return response
 
+def elicit_slot(intent_name, slots, slot_to_elicit, message, session_attributes=None):
+    """Ensure slot elicitation maintains session tracking, including session_id."""
+    if session_attributes is None:
+        session_attributes = {}
 
-def elicit_slot(intent_name, slots, slot_to_elicit, message):
-    return respond(message, intent_name, slots, "ElicitSlot", slot_to_elicit)
+    if "session_id" not in session_attributes:
+        session_attributes["session_id"] = f"sess-{int(time.time())}"  # Ensure session_id is tracked
+
+    return {
+        "sessionState": {
+            "dialogAction": {"type": "ElicitSlot", "slotToElicit": slot_to_elicit},
+            "intent": {"name": intent_name, "slots": slots, "state": "InProgress"},
+            "sessionAttributes": session_attributes,  # Persist session_id and other data
+        },
+        "messages": [{"contentType": "PlainText", "content": message}],
+    }
