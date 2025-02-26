@@ -120,7 +120,7 @@ def handle_dining_suggestions(intent, session_id, session_attributes):
     session_attributes["session_id"] = session_id
 
     # Track prompted slots using session attributes
-    prompted_slots = json.loads(session_attributes.get("prompted_slots", "{}"))  # Convert from string to dict
+    prompted_slots = {}  # Convert from string to dict
 
     required_slots = ["location", "cuisine", "date", "time", "numPeople", "email"]
 
