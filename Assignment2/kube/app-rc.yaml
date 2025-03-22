@@ -1,0 +1,32 @@
+# ReplicationController
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: flask-app-rc
+  namespace: eks-todo-list-app
+spec:
+  replicas: 3
+  selector:
+    app: flask-app-rc
+  template:
+    metadata:
+      labels:
+        app: flask-app-rc
+    spec:
+      containers:
+        - name: flask-app
+          image: yuwei2002/flask-todo-app:latest
+          ports:
+            - containerPort: 5050
+          env:
+            - name: MONGO_HOST
+              value: "mongodb"
+            - name: MONGO_PORT
+              value: "27017"
+          resources:
+            requests:
+              cpu: "0.3"
+              memory: "256Mi"
+            limits:
+              cpu: "0.5"
+              memory: "512Mi"

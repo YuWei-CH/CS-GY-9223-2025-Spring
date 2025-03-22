@@ -1,0 +1,46 @@
+global:
+  scrape_interval: 15s # collect metrics from targets every 15 seconds
+  evaluation_interval: 15s
+
+rule_files:
+  - "probe-alerts.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  - job_name: "all-kubernetes-pods"
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      # Add namespace as a label
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: kubernetes_namespace
+      # Add pod name as a label
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: kubernetes_pod_name
+
+  # Uses direct HTTP checks instead
+  - job_name: "blackbox"
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - localhost:9115
+
+  # Direct health check
+  - job_name: "app-health-check"
+    metrics_path: /health
+    scrape_interval: 10s
+    static_configs:
+      - targets:
+          - a178b2df693a147af84fb7579c29c31a-115792124.us-east-2.elb.amazonaws.com
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+      - target_label: __address__
+        replacement: a178b2df693a147af84fb7579c29c31a-115792124.us-east-2.elb.amazonaws.com:80
